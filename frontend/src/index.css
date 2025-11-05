@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* You can add project-level utilities or component classes here */
+.toastui-editor-md-preview {
+  padding: 4px !important;
+  margin-top: 0 !important;
+}
+
+.ProseMirror {
+  padding: 4px !important;
+}
