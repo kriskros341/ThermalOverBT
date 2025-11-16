@@ -15,7 +15,9 @@ export default defineConfig(({ command }) => ({
       '/status': 'http://localhost:8000',
       '/connect': 'http://localhost:8000',
       '/disconnect': 'http://localhost:8000',
-      '/print': 'http://localhost:8000'
+      '/print': 'http://localhost:8000',
+      '/print-async': 'http://localhost:8000',
+      '/jobs': 'http://localhost:8000'
     }
   }
 }))

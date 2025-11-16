@@ -3,14 +3,16 @@ import ImageEditor from '@toast-ui/react-image-editor'
 
 const menus = ['crop','flip','rotate','draw','shape','icon','text','filter']
 
-export default function ImagePage({ refreshStatus }) {
-  const editorRef = useRef(null)
-  const [loading, setLoading] = useState(false)
-  const [jobId, setJobId] = useState(null)
-  const [percent, setPercent] = useState(0)
-  const [jobStatus, setJobStatus] = useState(null)
+type Props = { refreshStatus?: () => Promise<void> }
 
-  const loadFileToEditor = (f) => {
+export default function ImagePage({ refreshStatus }: Props) {
+  const editorRef = useRef<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [percent, setPercent] = useState(0)
+  const [jobStatus, setJobStatus] = useState<string | null>(null)
+
+  const loadFileToEditor = (f: File) => {
     if (!f) return
     const url = URL.createObjectURL(f)
     const editor = editorRef.current?.getInstance?.()
@@ -18,14 +20,14 @@ export default function ImagePage({ refreshStatus }) {
     editor.loadImageFromURL(url, f.name || 'upload').then(() => {
       const dims = editor.getCanvasSize()
       editor.ui.resizeEditor({
-        width: Math.min(dims.width || 700, window.innerWidth - 40),
-        height: Math.min((dims.height || 500) + 120, window.innerHeight - 140)
+        width: Math.min((dims.width || 700), window.innerWidth - 40),
+        height: Math.min(((dims.height || 500) + 120), window.innerHeight - 140)
       })
       URL.revokeObjectURL(url)
     }).catch(() => URL.revokeObjectURL(url))
   }
 
-  const onFileChange = (e) => {
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (f) loadFileToEditor(f)
   }
@@ -45,10 +47,10 @@ export default function ImagePage({ refreshStatus }) {
         throw new Error(text || res.statusText)
       }
       const data = await res.json()
-      setJobId(data.job_id)
+      setJobId((data as any).job_id as string)
       setJobStatus('queued')
-    } catch (e) {
-      alert('Print failed: ' + e.message)
+    } catch (e: any) {
+      alert('Print failed: ' + (e?.message ?? String(e)))
     } finally {
       setLoading(false)
       refreshStatus?.()
@@ -64,9 +66,9 @@ export default function ImagePage({ refreshStatus }) {
         const r = await fetch(`/jobs/${jobId}`)
         if (!r.ok) return
         const j = await r.json()
-        setPercent(j.percent || 0)
-        setJobStatus(j.status)
-        if (j.status === 'done' || j.status === 'error') return
+        setPercent((j as any).percent || 0)
+        setJobStatus((j as any).status)
+        if ((j as any).status === 'done' || (j as any).status === 'error') return
       } catch {}
       if (!stop) setTimeout(tick, 800)
     }
@@ -92,16 +94,16 @@ export default function ImagePage({ refreshStatus }) {
         </div>
       )}
       <ImageEditor
-        ref={editorRef}
+        ref={editorRef as any}
         includeUI={{
-          menu: menus,
+          menu: menus as any,
           uiSize: { width: '100%', height: '720px' },
           menuBarPosition: 'bottom',
           loadImage: { path: '', name: '' },
         }}
         cssMaxWidth={900}
         cssMaxHeight={800}
-        selectionStyle={{ cornerSize: 20, rotatingPointOffset: 70 }}
+        selectionStyle={{ cornerSize: 20, rotatingPointOffset: 70 } as any}
         usageStatistics={false}
       />
     </div>

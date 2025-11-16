@@ -11,3 +11,11 @@
 .ProseMirror {
   padding: 4px !important;
 }
+
+.toastui-editor-tabs {
+  display: none !important;
+}
+
+.toastui-editor-mode-switch {
+  display: none !important;
+}
