@@ -1,9 +1,16 @@
 import React, { useRef, useState, useEffect } from 'react'
-import html2canvas from 'html2canvas'
 import ReactMarkdown from 'react-markdown'
 // import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { Editor as MdEditor } from '@toast-ui/react-editor'
+import {
+  PRINTER_WIDTH_PX,
+  ensureTailwindCdn,
+  captureElementToCanvas,
+  canvasToPngBlob,
+  postImageToPrinter,
+  mountCanvasIn,
+} from '../utils/printHelpers'
 
 type Props = { refreshStatus?: () => Promise<void> }
 
@@ -20,83 +27,33 @@ export default function MarkdownPage({ refreshStatus }: Props) {
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
 
   const onPrint = async () => {
-    if (!previewRef.current) return;
+    if (!previewRef.current) return
     try {
-      setLoading(true);
-
-      // 1. Clone the node deeply instead of using innerHTML. 
-      // This preserves all Tailwind classes and inline styles exactly.
-      const clone = previewRef.current.cloneNode(true) as HTMLElement;
-
-      // 2. Create a wrapper to handle the offscreen rendering
-      const container = document.createElement('div');
-      
-      // 3. Apply positioning and dimensions to the wrapper
-      container.style.position = 'absolute';
-      container.style.left = '-9999px';
-      container.style.top = '0';
-      container.style.width = '384px'; // Fixed print width
-      
-      // CRITICAL: Do NOT manually set fontFamily or lineHeight here. 
-      // Let the Tailwind classes in the 'clone' handle typography.
-      
-      container.appendChild(clone);
-      document.body.appendChild(container);
-
-      // -----------------------------------------------------------------
-      // ✨ KEY FIX: Wait for the browser to render the new node
-      // This gives it time to apply all the Tailwind CSS rules
-      // from your stylesheet to the newly added 'clone'.
-      // -----------------------------------------------------------------
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-
-      // 4. Generate Canvas
-      const canvas = await html2canvas(container, {
-        backgroundColor: '#ffffff',
-        scale: 2, // High resolution
-        logging: false,
-        // Fixes issue where text shifts if user has scrolled down the page
-        scrollY: -window.scrollY, 
-        useCORS: true, // Ensures external fonts load correctly
-      });
-
-      // 5. Cleanup and open preview (don't send yet)
-      document.body.removeChild(container);
-      setPreviewCanvas(canvas);
-      setShowPreview(true);
-      
+      setLoading(true)
+      const canvas = await captureElementToCanvas(previewRef.current, PRINTER_WIDTH_PX, 2)
+      setPreviewCanvas(canvas)
+      setShowPreview(true)
     } catch (e: any) {
-      alert('Print failed: ' + (e?.message ?? String(e)));
+      alert('Print failed: ' + (e?.message ?? String(e)))
     } finally {
-      setLoading(false);
-      // Only refresh after actually sending to printer
+      setLoading(false)
     }
   };
 
   const sendToPrinter = async () => {
     try {
-      if (!previewCanvas) return;
-      setLoading(true);
-      const dataURL = previewCanvas.toDataURL('image/png');
-      const blob = await (await fetch(dataURL)).blob();
-      const fd = new FormData();
-      fd.append('file', blob, 'note.png');
-
-      const res = await fetch('/print-async', { method: 'POST', body: fd });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || res.statusText);
-      }
-
-      const data = await res.json();
-      setJobId((data as any).job_id as string);
-      setJobStatus('queued');
-      setShowPreview(false);
+      if (!previewCanvas) return
+      setLoading(true)
+      const blob = await canvasToPngBlob(previewCanvas)
+      const { job_id } = await postImageToPrinter(blob, 'note.png')
+      setJobId(job_id)
+      setJobStatus('queued')
+      setShowPreview(false)
     } catch (e: any) {
-      alert('Print failed: ' + (e?.message ?? String(e)));
+      alert('Print failed: ' + (e?.message ?? String(e)))
     } finally {
-      setLoading(false);
-      refreshStatus?.();
+      setLoading(false)
+      refreshStatus?.()
     }
   };
   // Mount the returned canvas element into the preview modal container
@@ -104,15 +61,9 @@ export default function MarkdownPage({ refreshStatus }: Props) {
     if (!showPreview) return
     const mount = canvasMountRef.current
     if (!mount) return
-    // Clear previous children
-    mount.innerHTML = ''
     if (previewCanvas) {
-      // Ensure a consistent CSS width for display; pixels will be scaled by device pixel ratio
-      previewCanvas.style.width = '384px'
-      previewCanvas.style.height = 'auto'
-      mount.appendChild(previewCanvas)
+      mountCanvasIn(mount, previewCanvas, PRINTER_WIDTH_PX)
     }
-    // No explicit cleanup to preserve canvas element between open/close cycles
   }, [previewCanvas, showPreview])
 
   useEffect(() => {
@@ -135,22 +86,8 @@ export default function MarkdownPage({ refreshStatus }: Props) {
 
 
   useEffect(() => {
-    // Prevent multiple insertions
-    if (document.getElementById('tailwind-cdn')) {
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.id = 'tailwind-cdn';
-    script.src = 'https://cdn.tailwindcss.com';
-    script.defer = true;
-
-    document.head.appendChild(script);
-
-    return () => {
-      // Don’t remove script — keep globally cached
-    };
-  }, []);
+    ensureTailwindCdn()
+  }, [])
 
   return (
     <div className="w-[760px] mx-auto">
@@ -165,7 +102,7 @@ export default function MarkdownPage({ refreshStatus }: Props) {
       </div>
 
       {showPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+        <div className="print-preview fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-white rounded-lg shadow-xl w-[420px] max-w-[95vw] p-4">
             <div className="mb-3">
               <h2 className="text-base font-semibold">Print Preview</h2>
@@ -232,9 +169,6 @@ export default function MarkdownPage({ refreshStatus }: Props) {
               // remarkPlugins={[remarkGfm]}
               // rehypePlugins={[rehypeRaw, rehypeSanitize]}
               rehypePlugins={[rehypeRaw]}
-              components={{
-                text: ({ node, ...props }) => <text {...props} />,
-              }}
             >
               {markdown}
             </ReactMarkdown>

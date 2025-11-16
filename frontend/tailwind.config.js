@@ -7,7 +7,7 @@ export default {
   theme: {
     extend: {},
   },
-  plugins: [],
+  plugins: [require('@tailwindcss/typography')],
   // Avoid Tailwind's base reset interfering with third-party editor CSS
   corePlugins: {
     preflight: false,

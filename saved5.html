@@ -1,7 +1,7 @@
 
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Black & White small printable rectangular label: "Oregano" -->
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" preserveAspectRatio="xMidYMid meet" height="600" viewBox="0 0 600 600" role="img" aria-label="Rectangular Naklejka Oregano – small and B&W" id="label-svg">
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" preserveAspectRatio="xMidYMid meet" height="300" viewBox="0 0 600 600" role="img" aria-label="Rectangular Naklejka Oregano – small and B&W" id="label-svg">
 
   <!-- main rectangle label with strong contrast -->
   <rect x="50" y="50" width="500" height="500" fill="white" stroke="black" stroke-width="10" rx="20" ry="20"/>
@@ -17,13 +17,13 @@
 
   <!-- text -->
   <g width="500" height="500">
-    <foreignObject width="100%" height="100%" class="p-8" transform="translate(0, 130)">
+    <foreignObject width="100%" height="100%" class="p-8" transform="translate(0, 190)">
       <div class="p-20">
         <div style="font-family: Georgia; font-size: 40px; text-align:center;">
-          
+          {{ text }}
         </div>
         <div style="font-family: Georgia; font-size: 30px; text-align:center; color:grey">
-          Krzysztof Czuba
+          {{ name }}
         </div>
       </div>
     </foreignObject>
@@ -31,3 +31,15 @@
 
 
 </svg>
+
+
+<script>
+  [
+    { "name": "Krzysztof Czuba", "text": "Bardzo kocham Karolinę"
+  },
+    { "name": "Krzysztof Czuba", "text": "Karolina jest najlepsza"
+  },
+{ "name": "Krzysiusiusiu", "text": "Z Karoliną lubię być"
+  }
+  ]
+</script>

@@ -1,33 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import html2canvas from 'html2canvas'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import { Editor as MdEditor } from '@toast-ui/react-editor'
+import {
+  PRINTER_WIDTH_PX,
+  ensureTailwindCdn,
+  captureElementToCanvas,
+  canvasToPngBlob,
+  postImageToPrinter,
+  mountCanvasIn,
+} from '../utils/printHelpers'
+import { renderTemplate } from '../utils/template'
 
-/**
- * Simple templating: replaces {{ path.to.value }} with the corresponding value from the data object.
- * Supports dot and bracket notation (e.g., user.name, items[0].title). Missing values become ''.
- */
-function getByPath(obj: any, path: string): any {
-  try {
-    if (path == null || path === '') return ''
-    // Normalize bracket notation: items[0].name -> items.0.name
-    const norm = path.replace(/\[(\d+)\]/g, '.$1')
-    return norm.split('.').reduce((acc: any, key: string) => (acc == null ? undefined : acc[key]), obj)
-  } catch {
-    return undefined
-  }
-}
-
-function renderTemplate(template: string, data: any): string {
-  if (!template) return ''
-  return template.replace(/{{\s*([^}]+?)\s*}}/g, (_m, p1) => {
-    const val = getByPath(data, String(p1).trim())
-    if (val == null) return ''
-    if (typeof val === 'object') return JSON.stringify(val)
-    return String(val)
-  })
-}
 
 type Props = { refreshStatus?: () => Promise<void> }
 
@@ -47,6 +31,9 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
   const [showPreview, setShowPreview] = useState(false)
   const canvasMountRef = useRef<HTMLDivElement | null>(null)
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
+
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
 
   const previewRef = useRef<HTMLDivElement | null>(null)
   const mdRef = useRef<any>(null)
@@ -71,29 +58,7 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
     try {
       setLoading(true)
 
-      // Clone the entire preview region (which already renders all rows)
-      const clone = previewRef.current.cloneNode(true) as HTMLElement
-
-      // Wrap offscreen for capture at printer width
-      const container = document.createElement('div')
-      container.style.position = 'absolute'
-      container.style.left = '-9999px'
-      container.style.top = '0'
-      container.style.width = '384px' // Printer width
-
-      container.appendChild(clone)
-      document.body.appendChild(container)
-
-      // Render a high-res canvas
-      const canvas = await html2canvas(container, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        logging: false,
-        scrollY: -window.scrollY,
-        useCORS: true,
-      })
-
-      document.body.removeChild(container)
+      const canvas = await captureElementToCanvas(previewRef.current, PRINTER_WIDTH_PX, 2)
       setPreviewCanvas(canvas)
       setShowPreview(true)
     } catch (e: any) {
@@ -107,19 +72,9 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
     try {
       if (!previewCanvas) return
       setLoading(true)
-      const dataURL = previewCanvas.toDataURL('image/png')
-      const blob = await (await fetch(dataURL)).blob()
-      const fd = new FormData()
-      fd.append('file', blob, 'batch.png')
-
-      const res = await fetch('/print-async', { method: 'POST', body: fd })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || res.statusText)
-      }
-
-      const data = await res.json()
-      setJobId((data as any).job_id as string)
+      const blob = await canvasToPngBlob(previewCanvas)
+      const { job_id } = await postImageToPrinter(blob, 'batch.png')
+      setJobId(job_id)
       setJobStatus('queued')
       setShowPreview(false)
     } catch (e: any) {
@@ -130,16 +85,48 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
     }
   }
 
+  const executeTemplateImport = (text: string) => {
+    // Support multiple formats:
+    // 1) ```<script> ... </script>```
+    // 2) ```json ... ``` or ```js ... ```
+    // 3) <script> ... </script>
+    const patterns: RegExp[] = [
+      /```\s*<script(?:\s[^>]*)?>([\s\S]*?)<\/script>\s*```/i,
+      /```(?:json|js|javascript)\s+([\s\S]*?)```/i,
+      /<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/i,
+    ]
+
+    let match: RegExpExecArray | null = null
+    let usedPattern: RegExp | null = null
+    for (const re of patterns) {
+      const m = re.exec(text)
+      if (m && m[1]) {
+        match = m
+        usedPattern = re
+        break
+      }
+    }
+
+    if (match && usedPattern) {
+      const dataPart = match[1].trim()
+      const templatePart = text.replace(match[0], '').trim()
+      setDataText(dataPart)
+      setTemplateText(templatePart)
+      const inst = mdRef.current?.getInstance?.()
+      inst.setMarkdown(templatePart)
+      setShowImport(false)
+    } else {
+      alert('No valid data found in import text.')
+    }
+  }
+
   // Mount the returned canvas element into the preview modal container
   useEffect(() => {
     if (!showPreview) return
     const mount = canvasMountRef.current
     if (!mount) return
-    mount.innerHTML = ''
     if (previewCanvas) {
-      previewCanvas.style.width = '384px'
-      previewCanvas.style.height = 'auto'
-      mount.appendChild(previewCanvas)
+      mountCanvasIn(mount, previewCanvas, PRINTER_WIDTH_PX)
     }
   }, [previewCanvas, showPreview])
 
@@ -164,12 +151,7 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
 
   // Ensure Tailwind available for html2canvas capture context
   useEffect(() => {
-    if (document.getElementById('tailwind-cdn')) return
-    const script = document.createElement('script')
-    script.id = 'tailwind-cdn'
-    script.src = 'https://cdn.tailwindcss.com'
-    script.defer = true
-    document.head.appendChild(script)
+    ensureTailwindCdn()
   }, [])
 
   return (
@@ -182,10 +164,16 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
         >
           Print
         </button>
+        <button
+          className="px-3 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+          onClick={() => setShowImport(true)}
+        >
+          Importuj
+        </button>
       </div>
 
       {showPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+        <div className="print-preview fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-white rounded-lg shadow-xl w-[420px] max-w-[95vw] p-4">
             <div className="mb-3">
               <h2 className="text-base font-semibold">Print Preview</h2>
@@ -208,6 +196,39 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
                 disabled={loading}
               >
                 {loading ? 'Sending…' : 'Send to printer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImport && (
+        <div className="print-preview fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="max-h-[75vh] bg-white rounded-lg shadow-xl w-[420px] max-w-[95vw] p-4">
+            <div className="mb-3">
+              <h2 className="text-base font-semibold">Importuj</h2>
+            </div>
+            <div>
+              <div className="mb-2 text-sm font-medium">Zawartość</div>
+              <textarea
+                className="w-full outline outline-[#dadde6] rounded-md p-2 font-mono text-sm"
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50"
+                onClick={() => setShowImport(false)}
+              >
+                Zamknij
+              </button>
+              <button
+                className="px-3 py-1.5 text-sm rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                onClick={() => executeTemplateImport(importText)}
+              >
+                Importuj
               </button>
             </div>
           </div>
@@ -260,10 +281,10 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
             }}
           />
 
-          <div className="mt-3 mb-1 text-sm font-medium">Live preview (first item)</div>
-          <div className="outline outline-[#dadde6] rounded-md p-2">
+          <div className="mt-3 mb-1 text-sm font-medium">Live preview ({`${dataArray.length > 1 ? `first two items` : 'first item'}`} )</div>
+          <div className="outline outline-[#dadde6] rounded-md p-2 prose prose-sm max-w-none">
             <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-              {dataArray.length > 0 ? renderTemplate(templateText, dataArray[0]) : ''}
+              {dataArray.length > 0 ? `${renderTemplate(templateText, dataArray[0])} ${dataArray[1] ? renderTemplate(templateText, dataArray[1]) : ''}` : ''}
             </ReactMarkdown>
           </div>
         </div>
