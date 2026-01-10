@@ -1,4 +1,12 @@
 import { domToCanvas } from 'modern-screenshot'
+import { appendPrintHistory } from './printHistory'
+
+export type PrintHistoryMeta = {
+  route?: string
+  kind?: string
+  summary?: string
+  payload?: unknown
+}
 
 export const PRINTER_WIDTH_PX = 384
 
@@ -37,48 +45,18 @@ export async function captureElementToCanvas(
   container.style.width = `${widthPx}px`
   container.style.background = options?.background ?? '#ffffff'
   container.className = 'print-preview prose prose-sm max-w-none'
-
-  // Fix borders in SVG during capture
-  const borderStyleFix = document.createElement('style')
-  // borderStyleFix.innerHTML = `.print-preview * { box-sizing: border-box; border: none; } .print-preview { border: none; }`
-  container.appendChild(borderStyleFix)
+  container.style.fontSize = '32px'
 
   // Ensure clone width locks to printer width
   clone.style.width = `${widthPx}px`
   clone.style.boxSizing = 'border-box'
-  clone.style.padding = '8px';
+  // clone.style.padding = '8px';
   container.appendChild(clone)
   document.body.appendChild(container)
 
-  // Wait a frame so styles/layout apply
   await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
 
-  // Ensure images in the cloned subtree are loaded before capture
-  // const imgs = Array.from(container.querySelectorAll('img')) as HTMLImageElement[]
-  // if (imgs.length) {
-  //   await Promise.race([
-  //     Promise.all(
-  //       imgs.map((img) =>
-  //         img.complete && img.naturalWidth > 0
-  //           ? Promise.resolve()
-  //           : new Promise<void>((res) => {
-  //               const onDone = () => {
-  //                 img.removeEventListener('load', onDone)
-  //                 img.removeEventListener('error', onDone)
-  //                 res()
-  //               }
-  //               img.addEventListener('load', onDone)
-  //               img.addEventListener('error', onDone)
-  //             })
-  //       )
-  //     ),
-  //     // Safety timeout so we still render if an image hangs
-  //     new Promise((res) => setTimeout(res, 1500)),
-  //   ])
-  // }
-
   try {
-    // Capture the cloned element directly
     const canvas = await domToCanvas(clone, {
       backgroundColor: options?.background ?? '#ffffff',
       scale,
@@ -95,7 +73,11 @@ export async function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> 
   return await res.blob()
 }
 
-export async function postImageToPrinter(blob: Blob, filename = 'print.png'): Promise<{ job_id: string }> {
+export async function postImageToPrinter(
+  blob: Blob,
+  filename = 'print.png',
+  meta?: PrintHistoryMeta
+): Promise<{ job_id: string }> {
   const fd = new FormData()
   fd.append('file', blob, filename)
   const res = await fetch('/print-async', { method: 'POST', body: fd })
@@ -104,7 +86,9 @@ export async function postImageToPrinter(blob: Blob, filename = 'print.png'): Pr
     throw new Error(text || res.statusText)
   }
   const data = await res.json()
-  return { job_id: (data as any).job_id as string }
+  const job_id = (data as any).job_id as string
+  appendPrintHistory({ job_id, filename, ...meta })
+  return { job_id }
 }
 
 export function mountCanvasIn(mount: HTMLElement, canvas: HTMLCanvasElement, widthPx: number = PRINTER_WIDTH_PX) {

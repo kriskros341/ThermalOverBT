@@ -11,11 +11,16 @@ import {
   postImageToPrinter,
   mountCanvasIn,
 } from '../utils/printHelpers'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { limitPayloadString, summarizeText } from '../utils/printHistory'
 
 type Props = { refreshStatus?: () => Promise<void> }
 
 export default function MarkdownPage({ refreshStatus }: Props) {
   const [markdown, setMarkdown] = useState<string>('')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const lastRestoreJobIdRef = useRef<string | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const mdRef = useRef<any>(null)
   const [loading, setLoading] = useState(false)
@@ -45,7 +50,13 @@ export default function MarkdownPage({ refreshStatus }: Props) {
       if (!previewCanvas) return
       setLoading(true)
       const blob = await canvasToPngBlob(previewCanvas)
-      const { job_id } = await postImageToPrinter(blob, 'note.png')
+      const trimmed = markdown.trim()
+      const { job_id } = await postImageToPrinter(blob, 'note.png', {
+        route: '/markdown',
+        kind: 'markdown',
+        summary: summarizeText(trimmed),
+        payload: { markdown: limitPayloadString(trimmed) },
+      })
       setJobId(job_id)
       setJobStatus('queued')
       setShowPreview(false)
@@ -88,6 +99,22 @@ export default function MarkdownPage({ refreshStatus }: Props) {
   useEffect(() => {
     ensureTailwindCdn()
   }, [])
+
+  // Restore from global history (navigation state)
+  useEffect(() => {
+    const restore = (location.state as any)?.restore as any
+    if (!restore || restore.kind !== 'markdown') return
+    if (restore.job_id && lastRestoreJobIdRef.current === restore.job_id) return
+    const nextMd = String(restore?.payload?.markdown ?? '')
+    setMarkdown(nextMd)
+    try {
+      const inst = mdRef.current?.getInstance?.()
+      inst?.setMarkdown?.(nextMd)
+    } catch {}
+    lastRestoreJobIdRef.current = restore.job_id ?? null
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   return (
     <div className="w-[760px] mx-auto">
@@ -163,7 +190,7 @@ export default function MarkdownPage({ refreshStatus }: Props) {
           />
         </div>
 
-        <div className="w-1/2 h-[720px] outline outline-[#dadde6] rounded-md p-2">
+        <div className="prose w-1/2 h-[720px] outline outline-[#dadde6] rounded-md p-2">
           <div ref={previewRef} className="">
             <ReactMarkdown
               // remarkPlugins={[remarkGfm]}

@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react'
 import ImageEditor from '@toast-ui/react-image-editor'
+import { postImageToPrinter } from '../utils/printHelpers'
+import { summarizeText } from '../utils/printHistory'
 
 const menus = ['crop','flip','rotate','draw','shape','icon','text','filter']
 
@@ -39,15 +41,12 @@ export default function ImagePage({ refreshStatus }: Props) {
       setLoading(true)
       const dataURL = editor.toDataURL({ format: 'png' })
       const blob = await (await fetch(dataURL)).blob()
-      const fd = new FormData()
-      fd.append('file', blob, 'image.png')
-      const res = await fetch('/print-async', { method: 'POST', body: fd })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || res.statusText)
-      }
-      const data = await res.json()
-      setJobId((data as any).job_id as string)
+      const { job_id } = await postImageToPrinter(blob, 'image.png', {
+        route: '/image',
+        kind: 'image',
+        summary: summarizeText('Image'),
+      })
+      setJobId(job_id)
       setJobStatus('queued')
     } catch (e: any) {
       alert('Print failed: ' + (e?.message ?? String(e)))

@@ -11,11 +11,16 @@ import {
   mountCanvasIn,
 } from '../utils/printHelpers'
 import { renderTemplate } from '../utils/template'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { limitPayloadString, summarizeText } from '../utils/printHistory'
 
 
 type Props = { refreshStatus?: () => Promise<void> }
 
 export default function TemplatePrintPage({ refreshStatus }: Props) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const lastRestoreJobIdRef = useRef<string | null>(null)
   const [dataText, setDataText] = useState<string>(`[
   { "name": "Alice", "qty": 2, "price": 4.5 },
   { "name": "Bob", "qty": 1, "price": 9.99 }
@@ -73,7 +78,15 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
       if (!previewCanvas) return
       setLoading(true)
       const blob = await canvasToPngBlob(previewCanvas)
-      const { job_id } = await postImageToPrinter(blob, 'batch.png')
+      const { job_id } = await postImageToPrinter(blob, 'batch.png', {
+        route: '/template',
+        kind: 'template',
+        summary: summarizeText(templateText),
+        payload: {
+          templateText: limitPayloadString(templateText),
+          dataText: limitPayloadString(dataText),
+        },
+      })
       setJobId(job_id)
       setJobStatus('queued')
       setShowPreview(false)
@@ -153,6 +166,26 @@ export default function TemplatePrintPage({ refreshStatus }: Props) {
   useEffect(() => {
     ensureTailwindCdn()
   }, [])
+
+  // Restore from global history (navigation state)
+  useEffect(() => {
+    const restore = (location.state as any)?.restore as any
+    if (!restore || restore.kind !== 'template') return
+    if (restore.job_id && lastRestoreJobIdRef.current === restore.job_id) return
+    const nextTemplate = String(restore?.payload?.templateText ?? '')
+    const nextData = String(restore?.payload?.dataText ?? '')
+    if (nextData) setDataText(nextData)
+    if (nextTemplate) {
+      setTemplateText(nextTemplate)
+      try {
+        const inst = mdRef.current?.getInstance?.()
+        inst?.setMarkdown?.(nextTemplate)
+      } catch {}
+    }
+    lastRestoreJobIdRef.current = restore.job_id ?? null
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   return (
     <div className="w-[980px] mx-auto">
