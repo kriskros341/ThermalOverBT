@@ -3,7 +3,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
-import dynamic from 'next/dynamic';
+
 import '@toast-ui/editor/dist/toastui-editor.css';
 import { 
   captureElementToCanvas, 
@@ -13,15 +13,13 @@ import {
   PRINTER_WIDTH_PX
 } from '@/lib/print-helpers';
 import { summarizeText, limitPayloadString } from '@/lib/printHistory';
-import { TuiEditorRef } from '@/components/TuiEditor';
-
-const MdEditor = dynamic(() => import('@/components/TuiEditor'), { ssr: false });
+import { MarkdownEditor } from '@/components/MarkdownEditor';
 
 
 export default function MarkdownPage() {
   const [markdown, setMarkdown] = useState<string>('');
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const mdRef = useRef<TuiEditorRef>(null);
+  
   const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [percent, setPercent] = useState(0);
@@ -148,23 +146,11 @@ export default function MarkdownPage() {
 
       <div className="flex gap-4">
         <div className="w-1/2">
-          <MdEditor
-            ref={mdRef}
+          <MarkdownEditor
             initialValue={markdown}
-            initialEditType="markdown"
-            previewStyle="tab"
+            onChange={setMarkdown}
             height="720px"
-            usageStatistics={false}
             placeholder="Write notes here…"
-            onChange={() => {
-              try {
-                const inst = mdRef.current?.getInstance?.();
-                const md = inst?.getMarkdown?.() ?? ''
-                setMarkdown(md);
-              } catch {
-                // ignore
-              }
-            }}
           />
         </div>
 

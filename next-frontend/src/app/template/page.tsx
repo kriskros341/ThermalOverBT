@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
-import dynamic from 'next/dynamic';
+
 import {
   PRINTER_WIDTH_PX,
   captureElementToCanvas,
@@ -13,9 +13,7 @@ import {
 } from '@/lib/print-helpers';
 import { renderTemplate } from '@/lib/template';
 import { summarizeText, limitPayloadString } from '@/lib/printHistory';
-import { TuiEditorRef } from '@/components/TuiEditor';
-
-const MdEditor = dynamic(() => import('@/components/TuiEditor'), { ssr: false });
+import { TemplateEditor } from '@/components/TemplateEditor';
 
 export default function TemplatePrintPage() {
   const lastRestoreJobIdRef = useRef<string | null>(null);
@@ -39,7 +37,7 @@ export default function TemplatePrintPage() {
   const [importText, setImportText] = useState('');
 
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const mdRef = useRef<TuiEditorRef>(null);
+  
 
   const dataArray: any[] = useMemo(() => {
     try {
@@ -118,8 +116,6 @@ export default function TemplatePrintPage() {
       const templatePart = text.replace(match[0], '').trim();
       setDataText(dataPart);
       setTemplateText(templatePart);
-      const inst = mdRef.current?.getInstance?.();
-      inst?.setMarkdown(templatePart);
       setShowImport(false);
     } else {
       alert('No valid data found in import text.');
@@ -261,21 +257,11 @@ export default function TemplatePrintPage() {
 
         <div className="">
           <div className="mb-2 text-sm font-medium">Template (Markdown with {'{{}}'} placeholders)</div>
-          <MdEditor
-            ref={mdRef}
+          <TemplateEditor
             initialValue={templateText}
-            initialEditType="markdown"
-            previewStyle="tab"
+            onChange={setTemplateText}
             height="360px"
-            usageStatistics={false}
             placeholder="Write template here… Use {{ field }} placeholders."
-            onChange={() => {
-              try {
-                const inst = mdRef.current?.getInstance?.();
-                const md = inst?.getMarkdown?.() ?? '';
-                setTemplateText(md);
-              } catch {}
-            }}
           />
 
           <div className="mt-3 mb-1 text-sm font-medium">Live preview ({`${dataArray.length > 1 ? `first two items` : 'first item'}`} )</div>
