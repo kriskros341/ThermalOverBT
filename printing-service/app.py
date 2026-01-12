@@ -14,16 +14,7 @@ from contextlib import asynccontextmanager
 
 from printer import print_image_from_bytes, print_image_from_path
 
-try:
-    # PyBluez
-    from bluetooth import BluetoothSocket, RFCOMM, find_service
-except Exception as e:  # pragma: no cover - informative import failure
-    BluetoothSocket = None  # type: ignore
-    RFCOMM = None  # type: ignore
-    find_service = None  # type: ignore
-    _import_error = e
-else:
-    _import_error = None
+import socket
 
 # Configuration via environment variables
 PRINTER_MAC = os.getenv("PRINTER_MAC", "DC:0D:30:C1:01:35")
@@ -104,18 +95,7 @@ def _resolve_channel(mac: str) -> int:
             return int(PRINTER_RFCOMM_CHANNEL)
         except ValueError:
             pass
-    # 2) SDP query via PyBluez
-    if find_service is not None:
-        services = find_service(address=mac) or []
-        # Prefer RFCOMM services
-        for s in services:
-            if s.get("protocol") == "RFCOMM" and s.get("port"):
-                return int(s["port"])
-        # Fallback to first with a port
-        for s in services:
-            if s.get("port"):
-                return int(s["port"])
-    # 3) Typical default channel for SPP
+    # 2) Typical default channel for SPP
     return 1
 
 
@@ -124,17 +104,14 @@ def _is_connected() -> bool:
 
 
 def _connect_bt_if_needed() -> None:
-    global _bt_sock, _bt_channel, _last_error, _last_connect_attempt
-    if _import_error is not None:
-        _last_error = f"PyBluez not available: {_import_error}"
-        return
+    global _bt_sock, _bt_channel, _last_error
     with _state_lock:
         if _bt_sock is not None:
             return
         _last_connect_attempt = time.time()
         try:
             ch = _resolve_channel(PRINTER_MAC)
-            sock = BluetoothSocket(RFCOMM)  # type: ignore
+            sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
             sock.connect((PRINTER_MAC, ch))
             sock.settimeout(None)
             _bt_sock = sock
