@@ -7,7 +7,7 @@ This project provides a web interface for Phomemo thermal printers. It consists 
 The project is now a monorepo with two main components:
 
 -   `next-frontend`: A Next.js application that provides the user interface.
--   `printing-service`: A FastAPI application that handles the communication with the printer via Bluetooth.
+-   `printing-service`: A FastAPI application that handles the communication with the printer via Bluetooth using standard Python sockets.
 
 The Next.js frontend communicates with the printing service using server actions and API routes, which in turn make HTTP requests to the FastAPI service.
 
@@ -17,12 +17,11 @@ You need to run both the frontend and the printing service simultaneously.
 
 ### 1. Running the Printing Service
 
-The printing service is a Python application that uses FastAPI and PyBluez.
+The printing service is a Python application that uses FastAPI. It connects to the printer via Bluetooth RFCOMM using standard Python sockets.
 
 **Prerequisites:**
 
 -   Python 3
--   Bluetooth development libraries (`sudo apt-get install libbluetooth-dev`)
 
 **Setup:**
 
@@ -34,11 +33,8 @@ The printing service is a Python application that uses FastAPI and PyBluez.
     ```bash
     pip install -r requirements.txt
     ```
-3.  Find the MAC address of your printer:
-    ```bash
-    bluetoothctl paired-devices
-    ```
-4.  Run the printing service, replacing the MAC address with your printer's address:
+3.  Find the MAC address of your printer (e.g., using `bluetoothctl paired-devices` on Linux).
+4.  Run the printing service, replacing the MAC address with your printer's address. You can optionally specify the RFCOMM channel with `PRINTER_RFCOMM_CHANNEL` (defaults to 1).
     ```bash
     PRINTER_MAC=DC:0D:30:C1:01:35 uvicorn app:app --host 0.0.0.0 --port 8000
     ```
