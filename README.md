@@ -1,4 +1,4 @@
-# Phomemo Printer Web UI
+# Phomemo Printer Web Application
 
 This project provides a web interface for Phomemo thermal printers. It consists of a Next.js frontend and a Python-based printing microservice.
 
