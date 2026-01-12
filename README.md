@@ -1,56 +1,74 @@
-FastAPI server + React UI with Toast-ui editors
--------------------------
+# Phomemo Printer Web UI
 
-This repo includes a small FastAPI server that connects to the printer using a pure-Python Bluetooth RFCOMM socket (PyBluez) and exposes endpoints to print images.
+This project provides a web interface for Phomemo thermal printers. It consists of a Next.js frontend and a Python-based printing microservice.
 
-Env vars:
+## Architecture
 
-- `PRINTER_MAC` (default: `DC:0D:30:C1:01:35`)
-- `PRINTER_RFCOMM_CHANNEL` (optional) – RFCOMM channel/port. If not set, the server queries SDP; if that fails, it falls back to `1`.
-- `PRINTER_CONNECT_RETRY_SEC` (default: `5`)
+The project is now a monorepo with two main components:
 
-Install dependencies:
+-   `next-frontend`: A Next.js application that provides the user interface.
+-   `printing-service`: A FastAPI application that handles the communication with the printer via Bluetooth.
 
-```
-pip install -r requirements.txt
-```
+The Next.js frontend communicates with the printing service using server actions and API routes, which in turn make HTTP requests to the FastAPI service.
 
-Check device MAC:
+## Running the Application
 
-```
-bluetoothctl paired-devices
-```
+You need to run both the frontend and the printing service simultaneously.
 
-Optionaly create explicit socket:
-```
-sudo rfcomm connect /dev/rfcomm0 DC:0D:30:C1:01:35
-```
+### 1. Running the Printing Service
 
-Run the server:
+The printing service is a Python application that uses FastAPI and PyBluez.
 
-```
-PRINTER_MAC=DC:0D:30:C1:01:35 uvicorn app:app --host 0.0.0.0 --port 8000
-```
+**Prerequisites:**
 
-Build the React UI (optional; pre-existing simple UI will be replaced when you build):
+-   Python 3
+-   Bluetooth development libraries (`sudo apt-get install libbluetooth-dev`)
 
-```
-cd frontend
-npm install
-npm run build
-```
+**Setup:**
 
-This builds into `web/`, which FastAPI serves at `/ui/`.
+1.  Navigate to the `printing-service` directory:
+    ```bash
+    cd printing-service
+    ```
+2.  Install the Python dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  Find the MAC address of your printer:
+    ```bash
+    bluetoothctl paired-devices
+    ```
+4.  Run the printing service, replacing the MAC address with your printer's address:
+    ```bash
+    PRINTER_MAC=DC:0D:30:C1:01:35 uvicorn app:app --host 0.0.0.0 --port 8000
+    ```
 
-Endpoints:
+### 2. Running the Frontend
 
-- `GET /status` – connection info (connected/channel/last error)
-- `POST /connect` – try to connect now
-- `POST /disconnect` – close current socket
-- `POST /print` – multipart form-data with a `file` field containing the image to print
+The frontend is a Next.js application.
 
-License
--------------------------
+**Prerequisites:**
 
-You can use, modify, and share this software freely.
-If you distribute it (or your modifications), you must include the source, keep it under GPLv3, and preserve copyright notices.
+-   Node.js
+-   npm
+
+**Setup:**
+
+1.  Navigate to the `next-frontend` directory:
+    ```bash
+    cd next-frontend
+    ```
+2.  Install the Node.js dependencies:
+    ```bash
+    npm install
+    ```
+3.  Run the frontend development server:
+    ```bash
+    npm run dev
+    ```
+
+The frontend will be available at `http://localhost:3000`.
+
+## License
+
+This software is licensed under the GPLv3. You can use, modify, and share this software freely. If you distribute it (or your modifications), you must include the source, keep it under GPLv3, and preserve copyright notices.

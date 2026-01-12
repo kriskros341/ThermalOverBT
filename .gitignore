@@ -2,6 +2,4 @@
 __pycache__
 web
 
-
-frontend/node_modules
-frontend/pnpm-lock.yaml
+test_data/
