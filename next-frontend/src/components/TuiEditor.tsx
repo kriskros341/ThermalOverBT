@@ -16,28 +16,35 @@ export interface TuiEditorRef {
 const TuiEditor = forwardRef<TuiEditorRef, TuiEditorProps>((props, ref) => {
   const editorEl = useRef<HTMLDivElement>(null);
   const editorInstance = useRef<Editor | null>(null);
+  const onChangeRef = useRef(props.onChange);
 
+  // Keep the latest onChange without recreating the editor instance.
   useEffect(() => {
-    if (editorEl.current) {
-      editorInstance.current = new Editor({
-        el: editorEl.current,
-        ...props,
-      });
+    onChangeRef.current = props.onChange;
+  }, [props.onChange]);
 
-      if (props.onChange) {
-        editorInstance.current.on('change', () => {
-          if (editorInstance.current) {
-            props.onChange?.(editorInstance.current);
-          }
-        });
-      }
-    }
+  // Create the editor once on mount. Recreating it on every render (e.g. when
+  // props change on each keystroke) would wipe the document and reset the caret.
+  useEffect(() => {
+    if (!editorEl.current) return;
+
+    const { onChange: _onChange, ...editorOptions } = props;
+    const instance = new Editor({
+      el: editorEl.current,
+      ...editorOptions,
+    });
+    editorInstance.current = instance;
+
+    instance.on('change', () => {
+      onChangeRef.current?.(instance);
+    });
 
     return () => {
-      editorInstance.current?.destroy();
+      instance.destroy();
       editorInstance.current = null;
     };
-  }, [props]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useImperativeHandle(ref, () => ({
     getInstance: () => editorInstance.current,

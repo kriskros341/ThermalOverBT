@@ -152,8 +152,14 @@ export default function Calendar() {
     const newSearchParams = new URLSearchParams(searchParams.toString());
     if (startStr) newSearchParams.set('start', startStr); else newSearchParams.delete('start');
     if (endStr) newSearchParams.set('end', endStr); else newSearchParams.delete('end');
+    // Skip the navigation when nothing changed, otherwise router.replace keeps
+    // producing a new searchParams object and re-triggers this effect forever.
+    if (newSearchParams.toString() === searchParams.toString()) return;
     router.replace(`/calendar?${newSearchParams.toString()}`);
-  }, [startStr, endStr, router, searchParams]);
+    // searchParams is intentionally omitted: it changes identity on every
+    // router.replace and would cause an infinite update loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startStr, endStr, router]);
 
   const range = useMemo(() => {
     if (!validRange) return [] as Date[];

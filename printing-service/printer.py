@@ -1,10 +1,31 @@
-from typing import BinaryIO, Callable, Optional
-from PIL import Image
+from typing import BinaryIO, Callable, Optional, Union
+from PIL import Image, UnidentifiedImageError
 import time
 
 # Printer constants
 PRINTER_WIDTH = 384  # dots
 MAX_MARKER_LINES = 256 # Height of a chunk between markers
+
+
+class InvalidImageError(ValueError):
+    """Raised when the supplied bytes/file cannot be decoded as an image.
+
+    This is a *client* error (bad input) and is kept distinct from transport
+    errors (OSError raised while writing to the printer socket) so callers can
+    report the difference.
+    """
+
+
+def _open_image(source: Union[str, "BinaryIO"]) -> Image.Image:
+    # Centralised, well-labelled image decoding so callers get a clear reason.
+    try:
+        return Image.open(source)
+    except UnidentifiedImageError as e:
+        raise InvalidImageError(
+            f"Unrecognized or corrupt image data: {e}"
+        ) from e
+    except (OSError, ValueError) as e:
+        raise InvalidImageError(f"Could not read image: {e}") from e
 
 # Printer interface implementation is AI generated
 def _write(out: BinaryIO, data: bytes) -> None:
@@ -131,7 +152,7 @@ def print_image_from_path(
     out: BinaryIO,
     on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> None:
-    img = Image.open(path)
+    img = _open_image(path)
     return print_image_from_pil(img, out, on_progress=on_progress)
 
 
@@ -142,5 +163,5 @@ def print_image_from_bytes(
 ) -> None:
     from io import BytesIO
 
-    img = Image.open(BytesIO(data))
+    img = _open_image(BytesIO(data))
     return print_image_from_pil(img, out, on_progress=on_progress)

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import '@toast-ui/editor/dist/toastui-editor.css';
 import { TuiEditorRef } from '@/components/TuiEditor';
@@ -21,28 +21,20 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   placeholder = "Write notes here…",
 }) => {
   const mdRef = useRef<TuiEditorRef>(null);
-  const [editorValue, setEditorValue] = useState(initialValue);
 
-  // Update internal state when initialValue prop changes
+  // Push external value changes into the editor. Guard on the current content
+  // so the round-trip of the user's own typing (onChange -> parent -> initialValue)
+  // does NOT call setMarkdown, which would reset the cursor to the end.
   useEffect(() => {
-    setEditorValue(initialValue);
-  }, [initialValue]);
-
-  // Update TuiEditor instance when internal state changes
-  useEffect(() => {
-    if (mdRef.current?.getInstance) {
-      const instance = mdRef.current.getInstance();
-      if (instance && instance.getMarkdown() !== editorValue) {
-        instance.setMarkdown(editorValue);
-      }
+    const instance = mdRef.current?.getInstance?.();
+    if (instance && instance.getMarkdown() !== initialValue) {
+      instance.setMarkdown(initialValue);
     }
-  }, [editorValue]);
+  }, [initialValue]);
 
   const handleEditorChange = () => {
     try {
-      const inst = mdRef.current?.getInstance?.();
-      const md = inst?.getMarkdown?.() ?? '';
-      setEditorValue(md);
+      const md = mdRef.current?.getInstance?.()?.getMarkdown?.() ?? '';
       onChange(md);
     } catch {
       // ignore

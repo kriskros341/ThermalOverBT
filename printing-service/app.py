@@ -1,4 +1,6 @@
 import os
+import errno
+import logging
 import threading
 import time
 import tempfile
@@ -12,14 +14,49 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
-from printer import print_image_from_bytes, print_image_from_path
+from printer import print_image_from_bytes, print_image_from_path, InvalidImageError
 
 import socket
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("printing-service")
 
 # Configuration via environment variables
 PRINTER_MAC = os.getenv("PRINTER_MAC", "DC:0D:30:C1:01:35")
 PRINTER_RFCOMM_CHANNEL = os.getenv("PRINTER_RFCOMM_CHANNEL") # Optional explicit rfcomm channel
 CONNECT_RETRY_SEC = float(os.getenv("PRINTER_CONNECT_RETRY_SEC", "5"))
+# Reject uploads larger than this so a huge/malicious file can't exhaust memory.
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))  # 10 MiB
+
+
+# Human-readable hints for the OS errors we typically see over Bluetooth RFCOMM.
+_ERRNO_HINTS = {
+    errno.EHOSTDOWN: "printer is powered off or out of range",
+    errno.EHOSTUNREACH: "printer is unreachable (out of range or not paired)",
+    errno.ECONNREFUSED: "printer refused the connection (wrong RFCOMM channel, or printer not ready)",
+    errno.ETIMEDOUT: "connection timed out (printer asleep or out of range)",
+    errno.EACCES: "permission denied (Bluetooth adapter busy or access not allowed)",
+    errno.EPERM: "operation not permitted (Bluetooth may require elevated privileges)",
+    errno.ENODEV: "no such device (Bluetooth adapter missing)",
+    errno.EBADF: "Bluetooth socket is no longer valid",
+    errno.EPIPE: "connection lost while sending (broken pipe)",
+    errno.ECONNRESET: "connection reset by the printer",
+}
+
+
+def _describe_os_error(e: BaseException) -> str:
+    """Turn a raw OSError/socket error into an actionable, readable string."""
+    err = getattr(e, "errno", None)
+    if err is not None:
+        name = errno.errorcode.get(err, str(err))
+        detail = getattr(e, "strerror", None) or str(e)
+        hint = _ERRNO_HINTS.get(err)
+        base = f"[{name}] {detail}"
+        return f"{base} - {hint}" if hint else base
+    return str(e) or repr(e)
 
 
 @asynccontextmanager
@@ -104,23 +141,48 @@ def _is_connected() -> bool:
 
 
 def _connect_bt_if_needed() -> None:
-    global _bt_sock, _bt_channel, _last_error
+    global _bt_sock, _bt_channel, _last_error, _last_connect_attempt
     with _state_lock:
         if _bt_sock is not None:
             return
         _last_connect_attempt = time.time()
+        ch = _resolve_channel(PRINTER_MAC)
         try:
-            ch = _resolve_channel(PRINTER_MAC)
             sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+        except OSError as e:
+            _bt_sock = None
+            _bt_channel = None
+            _last_error = f"Bluetooth adapter unavailable: {_describe_os_error(e)}"
+            logger.error(_last_error)
+            return
+        try:
             sock.connect((PRINTER_MAC, ch))
             sock.settimeout(None)
             _bt_sock = sock
             _bt_channel = ch
             _last_error = None
-        except Exception as e:
+            logger.info("Connected to printer %s on RFCOMM channel %s", PRINTER_MAC, ch)
+        except OSError as e:
+            try:
+                sock.close()
+            except OSError:
+                pass
             _bt_sock = None
             _bt_channel = None
-            _last_error = f"Bluetooth connect failed: {e}"
+            _last_error = (
+                f"Bluetooth connect to {PRINTER_MAC} (channel {ch}) failed: "
+                f"{_describe_os_error(e)}"
+            )
+            logger.error(_last_error)
+        except Exception as e:
+            try:
+                sock.close()
+            except OSError:
+                pass
+            _bt_sock = None
+            _bt_channel = None
+            _last_error = f"Unexpected error connecting to {PRINTER_MAC} (channel {ch}): {e!r}"
+            logger.exception("Unexpected error connecting to printer")
 
 
 def _disconnect_bt() -> None:
@@ -178,10 +240,26 @@ def _print_worker_loop():
             print_image_from_path(job.path, writer, on_progress=on_prog)
             with _jobs_lock:
                 job.status = "done"
+            logger.info("Job %s printed successfully", job.id)
+        except InvalidImageError as e:
+            # Bad input, not a transport problem - keep the connection alive.
+            with _jobs_lock:
+                job.status = "error"
+                job.error = f"Invalid image: {e}"
+            logger.error("Job %s failed - invalid image: %s", job.id, e)
+        except OSError as e:
+            msg = _describe_os_error(e)
+            with _jobs_lock:
+                job.status = "error"
+                job.error = f"Printer communication error: {msg}"
+            logger.error("Job %s failed - transport error: %s", job.id, msg)
+            # Drop connection to force reconnect next time
+            _disconnect_bt()
         except Exception as e:
             with _jobs_lock:
                 job.status = "error"
-                job.error = str(e)
+                job.error = f"Unexpected error: {e!r}"
+            logger.exception("Job %s failed unexpectedly", job.id)
             # Drop connection to force reconnect next time
             _disconnect_bt()
         finally:
@@ -191,6 +269,34 @@ def _print_worker_loop():
             except Exception:
                 pass
 
+
+
+async def _read_upload_limited(file: UploadFile) -> bytes:
+    """Read an upload into memory, aborting early if it exceeds MAX_UPLOAD_BYTES.
+
+    Reads in chunks so an oversized (or malicious) file is rejected before it is
+    fully buffered, rather than after.
+    """
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            logger.warning(
+                "Rejected upload exceeding limit (%d bytes > %d)", total, MAX_UPLOAD_BYTES
+            )
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"File too large: exceeds the {MAX_UPLOAD_BYTES} byte "
+                    f"({MAX_UPLOAD_BYTES // (1024 * 1024)} MiB) limit"
+                ),
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.get("/")
@@ -232,10 +338,10 @@ async def disconnect():
 
 @app.post("/print")
 async def print_image(file: UploadFile = File(...)):
-    # Valdidate content
-    content = await file.read()
+    # Validate content
+    content = await _read_upload_limited(file)
     if not content:
-        raise HTTPException(status_code=400, detail="Empty file")
+        raise HTTPException(status_code=400, detail="Empty file: no image data was uploaded")
 
     # Ensure connected
     if not _is_connected():
@@ -243,36 +349,48 @@ async def print_image(file: UploadFile = File(...)):
     if not _is_connected():
         raise HTTPException(status_code=503, detail=_last_error or "Bluetooth not connected")
 
+    assert _bt_sock is not None
+    writer = SocketWriter(_bt_sock)
     try:
         # Stream image to the Bluetooth socket
-        assert _bt_sock is not None
-        writer = SocketWriter(_bt_sock)
         print_image_from_bytes(content, writer)
         return {"ok": True}
-    except Exception as e:
-        # On failure, drop the socket to force a reconnect next time
+    except InvalidImageError as e:
+        # Bad input - keep the connection, tell the caller what's wrong.
+        logger.warning("Rejected print request - invalid image: %s", e)
+        raise HTTPException(status_code=422, detail=f"Invalid image: {e}")
+    except OSError as e:
+        # Transport failure - drop the socket to force a reconnect next time.
         _disconnect_bt()
-        raise HTTPException(status_code=500, detail=f"Print failed: {e}")
+        msg = _describe_os_error(e)
+        logger.error("Print failed - transport error: %s", msg)
+        raise HTTPException(status_code=502, detail=f"Failed sending data to printer: {msg}")
+    except Exception as e:
+        _disconnect_bt()
+        logger.exception("Print failed unexpectedly")
+        raise HTTPException(status_code=500, detail=f"Print failed: {e!r}")
 
 
 @app.post("/print-async")
 async def print_async(file: UploadFile = File(...)):
-    content = await file.read()
+    content = await _read_upload_limited(file)
     if not content:
-        raise HTTPException(status_code=400, detail="Empty file")
+        raise HTTPException(status_code=400, detail="Empty file: no image data was uploaded")
     # Write to a temp file so worker can open it
     try:
         fd, path = tempfile.mkstemp(prefix="phomemo_", suffix=".img")
         with os.fdopen(fd, "wb") as f:
             f.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to store job file: {e}")
+    except OSError as e:
+        logger.error("Failed to store job file: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to store job file: {_describe_os_error(e)}")
 
     job_id = f"job_{int(time.time()*1000)}"
     job = PrintJob(id=job_id, path=path)
     with _jobs_lock:
         _jobs[job_id] = job
     _job_queue.put(job_id)
+    logger.info("Queued print job %s", job_id)
     return {"job_id": job_id}
 
 

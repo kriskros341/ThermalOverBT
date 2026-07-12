@@ -4,7 +4,6 @@ import React, { useRef, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 
-import '@toast-ui/editor/dist/toastui-editor.css';
 import { 
   captureElementToCanvas, 
   canvasToPngBlob, 
@@ -15,6 +14,9 @@ import {
 import { summarizeText, limitPayloadString } from '@/lib/printHistory';
 import { MarkdownEditor } from '@/components/MarkdownEditor';
 
+const isErrorObject = (e: unknown): e is { message?: string } => {
+  return !!e && typeof e === 'object' && 'message' in e;
+}
 
 export default function MarkdownPage() {
   const [markdown, setMarkdown] = useState<string>('');
@@ -30,15 +32,22 @@ export default function MarkdownPage() {
 
   const onPrint = async () => {
     if (!previewRef.current) return;
+
+    setLoading(true);
+    
+    let canvas = null;
     try {
-      setLoading(true);
-      const canvas = await captureElementToCanvas(previewRef.current, PRINTER_WIDTH_PX, 2);
-      setPreviewCanvas(canvas);
-      setShowPreview(true);
-    } catch (e: any) {
-      alert('Print failed: ' + (e?.message ?? String(e)));
+      canvas = await captureElementToCanvas(previewRef.current, PRINTER_WIDTH_PX, 2);
+    } catch (e: unknown) {
+      if (isErrorObject(e)) {
+        alert('Print failed: ' + (e?.message ?? String(e)));
+      } else {
+        alert('Print failed: ' + String(e));
+      }
     } finally {
       setLoading(false);
+      setPreviewCanvas(canvas);
+      setShowPreview(true);
     }
   };
 
@@ -59,8 +68,12 @@ export default function MarkdownPage() {
       setJobId(job_id);
       setJobStatus('queued');
       setShowPreview(false);
-    } catch (e: any) {
-      alert('Print failed: ' + (e?.message ?? String(e)));
+    } catch (e: unknown) {
+      if (isErrorObject(e)) {
+        alert('Print failed: ' + (e?.message ?? String(e)));
+      } else {
+        alert('Print failed: ' + String(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -82,11 +95,17 @@ export default function MarkdownPage() {
       try {
         const r = await fetch(`/api/jobs/${jobId}`);
         if (!r.ok) return;
-        const j = await r.json();
-        setPercent((j as any).percent || 0);
-        setJobStatus((j as any).status);
-        if ((j as any).status === 'done' || (j as any).status === 'error') return;
-      } catch {}
+        const j = await r.json() as { percent: number, status: string };
+        setPercent(j.percent);
+        setJobStatus(j.status);
+        if ((j).status === 'done' || (j).status === 'error') return;
+      } catch (e: unknown) {
+        if (isErrorObject(e)) {
+          alert('Failed to fetch job status: ' + (e?.message ?? String(e)));
+        } else {
+          alert('Failed to fetch job status: ' + String(e));
+        }
+      }
       if (!stop) setTimeout(tick, 800);
     };
     tick();
